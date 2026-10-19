@@ -27,6 +27,9 @@
  */
 
 const crypto = require("crypto");
+const {
+  proxyOptionInit,
+} = require("./proxy-pool");
 
 const UPDATE_API_BASE =
   process.env.OPENCODE_UPDATE_API_BASE || "https://opencode.ai/update/api";
@@ -372,13 +375,14 @@ async function fetchJson(url, timeoutMs = HANDSHAKE_TIMEOUT_MS) {
   const res = await fetch(url, {
     signal: AbortSignal.timeout(timeoutMs),
     headers: { accept: "application/json" },
+    ...proxyOptionInit(),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
 
 async function fetchText(url, timeoutMs = SOURCE_TIMEOUT_MS) {
-  const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+  const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs), ...proxyOptionInit() });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.text();
 }
@@ -396,7 +400,7 @@ async function listSourceDir(dir, ref, timeoutMs = SOURCE_TIMEOUT_MS) {
   try {
     const res = await fetch(
       `${GITHUB_API}/repos/${REPO}/contents/${dir}?ref=${encodeURIComponent(ref)}`,
-      { signal: AbortSignal.timeout(timeoutMs), headers: { accept: "application/vnd.github+json" } }
+      { signal: AbortSignal.timeout(timeoutMs), headers: { accept: "application/vnd.github+json" }, ...proxyOptionInit() }
     );
     if (!res.ok) return [];
     const json = await res.json();

@@ -6,7 +6,10 @@ WORKDIR /app
 ENV NODE_ENV=production \
     PORT=20129 \
     HOST=0.0.0.0 \
-    OPENCODE_CACHE_DIR=/data/cache
+    OPENCODE_CACHE_DIR=/data/cache \
+    # Egress proxy pool (comma-separated http/https proxy URLs). Empty means
+    # direct egress; see README § Proxy pool and proxy-pool.js.
+    PROXY_POOLS=""
 
 COPY --chown=bun:bun . .
 

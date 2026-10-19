@@ -11,7 +11,7 @@
 #      touching anything that is already running
 #   3. retires a pre-2.0 `opencode-bridge.service` that would fight for the port
 #   4. copies the bridge and its tools into an install dir (server.js,
-#      identity.js, token-budget.js, verify.js, gate-drill.js and the
+#      identity.js, token-budget.js, proxy-pool.js, verify.js, gate-drill.js and the
 #      transport-fingerprint files), backing up any existing install first
 #   5. registers a service so the bridge starts on boot and restarts on crash
 #      (systemd on Linux, launchd on macOS). Windows is not supported.
@@ -151,7 +151,7 @@ if [ -n "$PREV_VERSION" ]; then
   say "Found existing install: v$PREV_VERSION in $BINDIR"
   BACKUP="$BINDIR/.backup-v$PREV_VERSION-$(date +%Y%m%d%H%M%S)"
   mkdir -p "$BACKUP"
-  for f in server.js identity.js token-budget.js verify.js gate-drill.js transport-fingerprint.js transport-baseline.json package.json tunnel-doctor.sh; do
+  for f in server.js identity.js token-budget.js proxy-pool.js verify.js gate-drill.js transport-fingerprint.js transport-baseline.json package.json tunnel-doctor.sh; do
     [ -f "$BINDIR/$f" ] && cp -p "$BINDIR/$f" "$BACKUP/$f" 2>/dev/null || true
   done
   say "Backed up to $BACKUP"
@@ -355,6 +355,7 @@ fetch package.json
 fetch server.js
 fetch identity.js
 fetch token-budget.js
+fetch proxy-pool.js
 fetch verify.js
 fetch gate-drill.js
 fetch transport-fingerprint.js
@@ -375,7 +376,7 @@ syntax_check() {
   ' "$1"
 }
 
-for js in server.js identity.js token-budget.js verify.js gate-drill.js transport-fingerprint.js; do
+for js in server.js identity.js token-budget.js proxy-pool.js verify.js gate-drill.js transport-fingerprint.js; do
   syntax_check "$STAGE/$js" >/dev/null 2>&1 || die "$js failed a syntax check; the running bridge was left untouched"
 done
 for json in package.json transport-baseline.json; do
@@ -406,7 +407,7 @@ if [ -n "$(port_holder)" ]; then
   die "cannot bind port $PORT"
 fi
 
-for file in package.json server.js identity.js token-budget.js verify.js gate-drill.js transport-fingerprint.js transport-baseline.json tunnel-doctor.sh; do
+for file in package.json server.js identity.js token-budget.js proxy-pool.js verify.js gate-drill.js transport-fingerprint.js transport-baseline.json tunnel-doctor.sh; do
   [ -f "$STAGE/$file" ] && mv -f "$STAGE/$file" "$BINDIR/$file"
 done
 chmod +x "$BINDIR/server.js" "$BINDIR/identity.js" "$BINDIR/verify.js" "$BINDIR/gate-drill.js" "$BINDIR/transport-fingerprint.js" "$BINDIR/tunnel-doctor.sh" 2>/dev/null || true

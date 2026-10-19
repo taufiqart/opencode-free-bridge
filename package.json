@@ -31,8 +31,7 @@
     "AGENTS.md",
     "install.sh",
     "transport-fingerprint.js",
-    "transport-baseline.json",
-    "tunnel-doctor.sh"
+    "proxy-pool.js"
   ],
   "keywords": [
     "opencode",

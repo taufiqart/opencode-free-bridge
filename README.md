@@ -347,8 +347,51 @@ Before running the 4 live drills, `gate-drill.js` sends a single CLI-shaped cont
 | `OPENCODE_CACHE_DIR` | `~/.opencode-free-bridge/cache` | Directory for the on-disk `catalog.json` cache (`off` disables disk caching) |
 | `OPENCODE_CHAT_URL` | _(derived)_ | Override the upstream Chat Completions endpoint URL |
 | `OPENCODE_RESPONSES_URL` | _(derived)_ | Override the upstream Responses API endpoint URL |
+| `PROXY_POOLS` | _(empty)_ | Egress proxy pool, comma-separated. Only `http://` / `https://` proxy URLs (with optional `user:pass@`) are used — Bun 1.4's fetch cannot tunnel through `socks5://`/`socks5h://`/`socks4://` yet ([oven-sh/bun#16812](https://github.com/oven-sh/bun/issues/16812)); socks entries stay listed in `/health` under `proxy.skipped` for visibility. Every upstream fetch (inference, identity refresh, model discovery, self-update) picks one per request, round-robin |
+| `PROXY_BOUNCE_AFTER` | `3` | Consecutive failures after which a proxy is taken out of rotation |
+| `PROXY_BOUNCE_COOLDOWN_MS` | `300000` | How long a bounced proxy stays out of rotation (ms) |
 | `AUTO_UPDATE` | `1` | Poll GitHub for bridge updates every 6 hours (automatically skipped inside a `.git` checkout; set `0` to disable) |
 | `ALLOW_NODE` | _(unset)_ | Set `ALLOW_NODE=1` to bypass the startup Bun check for offline tests |
+
+## Proxy Pool
+
+`PROXY_POOLS` routes every outbound request the bridge makes — upstream
+inference, the identity refresh against `opencode.ai`, the provider-catalog
+read, the model discovery feed, and the self-updater — through a pool of
+HTTP(S) proxies instead of the process's own IP:
+
+```bash
+PROXY_POOLS="http://10.0.0.2:3128, http://user:pass@10.0.0.3:3128" bun server.js
+```
+
+```yaml
+# docker-compose.yaml
+environment:
+  PROXY_POOLS: "http://10.0.0.2:3128, http://user:pass@10.0.0.3:3128"
+```
+
+Behavior:
+
+- **Round-robin per request**, not per process: two concurrent
+  `/v1/chat/completions` calls can leave through two different proxies.
+- **Health-aware**: after `PROXY_BOUNCE_AFTER` consecutive failures a proxy is
+  skipped for `PROXY_BOUNCE_COOLDOWN_MS`, then tried again. `GET /health`
+  reports the pool under `proxy` (per-entry good/bad counters, bounce state,
+  last error — credentials redacted).
+- **Socks is not supported yet**: Bun 1.4's `fetch({ proxy })` only tunnels
+  `http://` and `https://` proxy URLs; `socks5://`, `socks5h://` and
+  `socks4://` throw `UnsupportedProxyProtocol`
+  ([oven-sh/bun#16812](https://github.com/oven-sh/bun/issues/16812)). The pool
+  classifies those entries on parse, keeps them visible in `/health →
+  proxy.skipped`, and never attaches them to a request — the bridge keeps
+  serving through the remaining pool instead of failing the request.
+- **No TLS fingerprint change**: the gate inspects the `ClientHello` the
+  *runtime* produces (see `transport-fingerprint.js`); a proxy only relays
+  bytes, so the tunnel stays Bun-shaped. The per-IP allowance upstream
+  enforces now counts the proxy's egress IP, which is the point.
+
+When `PROXY_POOLS` is unset the bridge behaves exactly as before — no proxy
+option is attached to any fetch.
 
 ## Troubleshooting
 

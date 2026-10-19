@@ -634,11 +634,13 @@ async function probeUpstream(identity) {
   }
 
   try {
+    const pool = require("./proxy-pool");
     const res = await fetch(resolveEndpoints(model).chatUrl, {
       method: "POST",
       headers,
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(60000),
+      ...pool.proxyOptionInit(),
     });
     const text = await res.text().catch(() => "");
     const open = res.status === 200 || res.status === 429;
@@ -1017,7 +1019,9 @@ async function main() {
 
 let port = () => 0;
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

@@ -8,6 +8,45 @@ try {
   VERSION = require("./package.json").version || VERSION;
 } catch {}
 const { effectiveMaxTokens } = require("./token-budget");
+const {
+  proxyPool,
+  proxyFetchOption,
+  proxyOptionInit,
+  reportProxyOutcome,
+} = require("./proxy-pool");
+
+/**
+ * The egress fetch: identical to `fetch` when PROXY_POOLS is unset, otherwise
+ * it picks a proxy for this one request and reports the outcome back to the
+ * pool, which is what drives the bounce (a dead proxy leaves rotation after
+ * PROXY_BOUNCE_AFTER consecutive failures) and clears a streak on success.
+ * The chosen proxy is *not* reused for the response body — only the dial goes
+ * through it — so reporting here covers connection failures, which is the
+ * failure mode that has to move the pool. HTTP-level failures upstream are
+ * the model's answer, not the proxy's, and are not counted against it.
+ */
+function egressFetch(url, init = {}) {
+  const pick = proxyFetchOption();
+  if (!pick) return fetch(url, init);
+  return fetch(url, { ...init, ...pick.init }).then(
+    (res) => {
+      reportProxyOutcome({ entry: pick.entry, ok: true });
+      return res;
+    },
+    (err) => {
+      reportProxyOutcome({ entry: pick.entry, ok: false, error: err });
+      throw err;
+    }
+  );
+}
+
+/**
+ * The option fragment for callers that need to keep the raw `fetch` (tests
+ * that mock global.fetch, the gate drill): `{ proxy }` or undefined.
+ */
+function egressProxyInit() {
+  return proxyOptionInit();
+}
 
 const PORT = parseInt(process.env.PORT || "20129", 10);
 const HOST = process.env.HOST || "127.0.0.1";
@@ -45,6 +84,7 @@ const UPDATE_FILES = [
   "package.json",
   "identity.js",
   "token-budget.js",
+  "proxy-pool.js",
   "verify.js",
   "gate-drill.js",
   "transport-fingerprint.js",
@@ -100,7 +140,7 @@ async function checkAndApplyUpdate() {
     const tmpFiles = [];
     const cb = Date.now();
     try {
-      const pkgRes = await fetch(`${UPDATE_BASE_URL}/package.json?cb=${cb}`, {
+      const pkgRes = await egressFetch(`${UPDATE_BASE_URL}/package.json?cb=${cb}`, {
         headers: { "Cache-Control": "no-cache" },
         signal: AbortSignal.timeout(8000),
       });
@@ -113,11 +153,10 @@ async function checkAndApplyUpdate() {
       }
 
       for (const file of UPDATE_FILES) {
-        const res = await fetch(`${UPDATE_BASE_URL}/${file}?cb=${cb}`, {
+        const res = await egressFetch(`${UPDATE_BASE_URL}/${file}?cb=${cb}`, {
           headers: { "Cache-Control": "no-cache" },
           signal: AbortSignal.timeout(15000),
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${file}`);
         const text = await res.text();
         if (!text || text.length < 20) throw new Error(`empty response for ${file}`);
         if (file.endsWith(".js")) {
@@ -335,7 +374,7 @@ async function discoverModels() {
     refreshCliVersion().catch(() => {});
     checkAndApplyUpdate().catch(() => {});
     try {
-    const res = await fetch(resolveEndpoints().modelsUrl, {
+    const res = await egressFetch(resolveEndpoints().modelsUrl, {
       headers: {
         "Authorization": "Bearer public",
         "User-Agent": currentUserAgent,
@@ -1321,6 +1360,7 @@ function handleRequest(req, res) {
     return res.end(
       JSON.stringify({
         status: "ok",
+        proxy: proxyPool.stats(),
         provider: "opencode-free-bridge",
         version: VERSION,
         runtime: typeof Bun !== "undefined" ? `bun/${Bun.version}` : `node/${process.versions.node}`,
@@ -1537,7 +1577,7 @@ function handleRequest(req, res) {
         let liveEndpoints = resolveEndpoints(targetModel);
         let upstreamUrl = useResponses ? liveEndpoints.responsesUrl : liveEndpoints.chatUrl;
 
-        let upstreamRes = await fetch(upstreamUrl, {
+        let upstreamRes = await egressFetch(upstreamUrl, {
           method: "POST",
           headers: upstreamHeaders,
           body: JSON.stringify(upstreamBody),
@@ -1565,7 +1605,7 @@ function handleRequest(req, res) {
             markProtocolSupport(targetModel, useResponses);
             ({ upstreamBody, aliasToOriginal } = buildUpstreamPayload(body, targetModel, useResponses));
             upstreamUrl = useResponses ? liveEndpoints.responsesUrl : liveEndpoints.chatUrl;
-            upstreamRes = await fetch(upstreamUrl, {
+            upstreamRes = await egressFetch(upstreamUrl, {
               method: "POST",
               headers: upstreamHeaders,
               body: JSON.stringify(upstreamBody),
@@ -1623,7 +1663,7 @@ function handleRequest(req, res) {
                 `[opencode-free-bridge] Upstream endpoint moved (${upstreamRes.status}): ${staleUrl} → ${derivedUrl}; retrying once`
               );
               upstreamUrl = derivedUrl;
-              upstreamRes = await fetch(upstreamUrl, {
+              upstreamRes = await egressFetch(upstreamUrl, {
                 method: "POST",
                 headers: upstreamHeaders,
                 body: JSON.stringify(upstreamBody),
@@ -1655,7 +1695,7 @@ function handleRequest(req, res) {
               (firstLogId ? ` [x-opencode-log-id: ${firstLogId}]` : "") +
               `; retrying once with fresh session`
           );
-          upstreamRes = await fetch(upstreamUrl, {
+          upstreamRes = await egressFetch(upstreamUrl, {
             method: "POST",
             headers: retry5xxHeaders,
             body: JSON.stringify(upstreamBody),
@@ -1779,7 +1819,7 @@ function handleRequest(req, res) {
             liveEndpoints = resolveEndpoints(targetModel);
             upstreamUrl = useResponses ? liveEndpoints.responsesUrl : liveEndpoints.chatUrl;
             retryHeaders = buildUpstreamHeaders(req, retrySessionId);
-            upstreamRes = await fetch(upstreamUrl, {
+            upstreamRes = await egressFetch(upstreamUrl, {
               method: "POST",
               headers: retryHeaders,
               body: JSON.stringify(upstreamBody),
@@ -2521,6 +2561,9 @@ module.exports = {
   resolveEndpoints,
   buildUpstreamHeaders,
   getProjectId,
+  egressProxyInit,
+  egressFetch,
+  _proxyPool: proxyPool,
   extractResponsesFinishReason,
   extractStreamError,
   getPersistentSessionId,

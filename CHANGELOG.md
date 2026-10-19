@@ -1,5 +1,36 @@
 # Changelog
 
+
+## [2.0.3] — 2026-10-19
+
+### Egress proxy pool
+
+The bridge can now dial out through a pool of HTTP(S) proxies. Set
+`PROXY_POOLS` (comma-separated; the Docker compose file takes it as-is) and
+every upstream `fetch` — inference, identity refresh, catalog read, model
+discovery, self-update — carries Bun's `{ proxy }` option with a
+round-robin pick.
+
+- **New `proxy-pool.js`** (zero-dependency, like everything else): URL
+  classification, round-robin rotation, consecutive-failure bounce with a
+  cooldown (`PROXY_BOUNCE_AFTER` = 3, `PROXY_BOUNCE_COOLDOWN_MS` = 300000),
+  credential-redacted stats surfaced on `/health` under `proxy`.
+- **Socks entries are visible, not used.** Bun 1.4 `fetch` only tunnels
+  `http://`/`https://` proxies; `socks5://`, `socks5h://`, `socks4://` throw
+  `UnsupportedProxyProtocol` upstream ([oven-sh/bun#16812][]). The pool
+  classifies them on parse, lists them under `/health → proxy.skipped`, and
+  never attaches them to a request. The moment Bun ships SOCKS support the
+  pool will start dialing them with no code change here.
+- **Wired into every egress call site** in `server.js` (inference first
+  attempt, protocol-lane retry, endpoint-migration retry, 5xx retry, gate
+  retry, model discovery, self-updater), `identity.js` (handshake, source
+  fetch, release directory listing), and `gate-drill.js`'s live probe.
+- **No behavior change when unset**: `proxy-pool.js` returns `undefined` for
+  its option fragment and the callsites spread it, so an empty `PROXY_POOLS`
+  is byte-for-byte the old request path.
+
+[oven-sh/bun#16812]: https://github.com/oven-sh/bun/issues/16812
+
 ## [2.0.1] — 2026-10-18
 
 ### Tunnel lifecycle tooling actually reaches installed hosts

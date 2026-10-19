@@ -10,6 +10,19 @@ services:
       HOST: "0.0.0.0"
       OPENCODE_CACHE_DIR: /data/cache
       AUTO_UPDATE: "1"
+      # Egress proxy pool. Comma-separated; every upstream fetch (inference,
+      # identity refresh, model discovery, self-update) picks one per request,
+      # round-robin, and skips a proxy for PROXY_BOUNCE_COOLDOWN_MS after
+      # PROXY_BOUNCE_AFTER consecutive failures.
+      #
+      # Bun 1.4 fetch can only tunnel through `http://` / `https://` proxies
+      # (with optional `user:pass@` credentials); `socks5://`, `socks5h://`
+      # and `socks4://` URLs are kept in the pool for reporting but never
+      # attached to a request — upstream throws UnsupportedProxyProtocol
+      # (oven-sh/bun#16812). See README § Proxy pool.
+      PROXY_POOLS: "http://10.0.0.2:3128, http://user:pass@10.0.0.3:3128"
+      # PROXY_BOUNCE_AFTER: "3"          # consecutive failures before a bounce
+      # PROXY_BOUNCE_COOLDOWN_MS: "300000"
     volumes:
       - bridge-cache:/data/cache
     expose:
